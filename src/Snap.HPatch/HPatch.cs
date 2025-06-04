@@ -1463,6 +1463,153 @@ public unsafe class HPatchStreamOutput : HPatchStreamInput
             return outCache.PatchByClip(oldData, pcovers, code_newDataDiffClip, rle_loader, temp_cache, cacheSize);
         }
     }
+
+    // _patch_decompress_cache
+    public bool PatchDecompressCache(HPatchStreamInput once_in_newData, HPatchStreamInput oldData, HPatchStreamInput compressedDiff, HPatchDecompress decompressPlugin, IHPatchCovers cached_covers, byte* temp_cache, byte* temp_cache_end)
+    {
+        StreamCacheClip coverClip = new StreamCacheClip();
+        StreamCacheClip code_newDataDiffClip = new StreamCacheClip();
+        BytesRleLoadStream rle_loader = new BytesRleLoadStream();
+        HDiffzHead head = new HDiffzHead();
+        HPatchCompressedDiffInfo diffInfo = new HPatchCompressedDiffInfo();
+        DecompressInputStream[] decompressers = new DecompressInputStream();
+        nuint i;
+        ulong coverCount;
+        int result = true;
+        ulong diffPos0 = 0;
+        ulong diffPos_end = compressedDiff->StreamSize;
+        nuint cacheSize = (temp_cache_end - temp_cache) / ((cached_covers) != null ? (6 - 1) : 6);
+
+        if (cacheSize <= 259)
+        {
+            return false;
+        }
+
+        ((void)((!!(out_newData != null)) || (_wassert("out_newData!=0", "patch.c", unchecked((uint)(1265))) , 0) != 0));
+        ((void)((!!(out_newData->write != null)) || (_wassert("out_newData->write!=0", "patch.c", unchecked((uint)(1266))) , 0) != 0));
+        ((void)((!!(oldData != null)) || (_wassert("oldData!=0", "patch.c", unchecked((uint)(1267))) , 0) != 0));
+        ((void)((!!(oldData->read != null)) || (_wassert("oldData->read!=0", "patch.c", unchecked((uint)(1268))) , 0) != 0));
+        ((void)((!!(compressedDiff != null)) || (_wassert("compressedDiff!=0", "patch.c", unchecked((uint)(1269))) , 0) != 0));
+        ((void)((!!(compressedDiff->read != null)) || (_wassert("compressedDiff->read!=0", "patch.c", unchecked((uint)(1270))) , 0) != 0));
+
+        {
+            if (read_diffz_head(&diffInfo, &head, compressedDiff) == 0)
+            {
+                return 0;
+            }
+
+            if ((diffInfo.oldDataSize != oldData->StreamSize) || (diffInfo.newDataSize != out_newData->StreamSize))
+            {
+                return 0;
+            }
+
+            if ((decompressPlugin == null) && (diffInfo.compressedCount != 0))
+            {
+                return 0;
+            }
+
+            if ((decompressPlugin) != null && (diffInfo.compressedCount > 0))
+            {
+                if (decompressPlugin->is_can_open(diffInfo.compressType) == 0)
+                {
+                    return 0;
+                }
+            }
+
+            diffPos0 = head.HeadEndPos;
+        }
+
+        for (i = 0; i < unchecked(sizeof(DecompressInputStream) / sizeof(DecompressInputStream)); ++i)
+        {
+            decompressers[i].decompressHandle = null;
+        }
+
+        _TBytesRle_load_stream_init(&rle_loader);
+        if ((cached_covers) != null)
+        {
+            diffPos0 = head.CoverEndPos;
+        }
+        else
+        {
+            if (getStreamClip(&coverClip, &decompressers[0], head.CoverBufSize, head.CompressCoverBufSize, compressedDiff, &diffPos0, decompressPlugin, temp_cache + cacheSize * (6 - 1), cacheSize) == 0)
+            {
+                result = 0;
+                goto clear;
+            }
+
+            ;
+        }
+
+        if (getStreamClip(&rle_loader.ctrlClip, &decompressers[1], head.RleCtrlBufSize, head.CompressRleCtrlBufSize, compressedDiff, &diffPos0, decompressPlugin, temp_cache, cacheSize) == 0)
+        {
+            result = 0;
+            goto clear;
+        }
+
+        ;
+        temp_cache += cacheSize;
+        if (getStreamClip(&rle_loader.rleCodeClip, &decompressers[2], head.RleCodeBufSize, head.CompressRleCodeBufSize, compressedDiff, &diffPos0, decompressPlugin, temp_cache, cacheSize) == 0)
+        {
+            result = 0;
+            goto clear;
+        }
+
+        ;
+        temp_cache += cacheSize;
+        if (getStreamClip(&code_newDataDiffClip, &decompressers[3], head.NewDataDiffSize, head.CompressNewDataDiffSize, compressedDiff, &diffPos0, decompressPlugin, temp_cache, cacheSize) == 0)
+        {
+            result = 0;
+            goto clear;
+        }
+
+        ;
+        temp_cache += cacheSize;
+        if (diffPos0 != diffPos_end)
+        {
+            result = 0;
+            goto clear;
+        }
+
+        ;
+        coverCount = head.CoverCount;
+
+        {
+            Covers covers = new Covers();
+            IHPatchCovers* pcovers = null;
+            OutStreamCache outCache = new OutStreamCache();
+
+            _TOutStreamCache_init(&outCache, out_newData, temp_cache, cacheSize);
+            temp_cache += cacheSize;
+            if ((cached_covers) != null)
+            {
+                pcovers = cached_covers;
+            }
+            else
+            {
+                _covers_init(&covers, coverCount, &coverClip, &coverClip, &coverClip, true);
+                pcovers = &covers.ICovers;
+            }
+
+            result = patchByClip(&outCache, oldData, pcovers, &code_newDataDiffClip, &rle_loader, temp_cache, cacheSize);
+        }
+
+        clear:
+        for (i = 0; i < unchecked(sizeof(DecompressInputStream) / sizeof(DecompressInputStream)); ++i)
+        {
+            if ((decompressers[i].decompressHandle) != null)
+            {
+                if (decompressPlugin->close(decompressPlugin, decompressers[i].decompressHandle) == 0)
+                {
+                    result = 0;
+                }
+
+                decompressers[i].decompressHandle = null;
+            }
+        }
+
+        return result;
+    }
+
 }
 
 public unsafe class HPatchCompressedDiffInfo
@@ -2379,151 +2526,6 @@ public static unsafe partial class HPatch
 
 
 
-    [return: NativeTypeName("hpatch_BOOL")]
-    public static int _patch_decompress_cache([NativeTypeName("const hpatch_TStreamOutput *")] HPatchStreamOutput* out_newData, HPatchStreamInput* once_in_newData, [NativeTypeName("const hpatch_TStreamInput *")] HPatchStreamInput* oldData, [NativeTypeName("const hpatch_TStreamInput *")] HPatchStreamInput* compressedDiff, HPatchDecompress* decompressPlugin, IHPatchCovers* cached_covers, [NativeTypeName("TByte *")] byte* temp_cache, [NativeTypeName("TByte *")] byte* temp_cache_end)
-    {
-        StreamCacheClip coverClip = new StreamCacheClip();
-        StreamCacheClip code_newDataDiffClip = new StreamCacheClip();
-        BytesRleLoadStream rle_loader = new BytesRleLoadStream();
-        HDiffzHead head = new HDiffzHead();
-        HPatchCompressedDiffInfo diffInfo = new HPatchCompressedDiffInfo();
-        DecompressInputStream[] decompressers = new DecompressInputStream();
-        nuint i;
-        ulong coverCount;
-        int result = true;
-        ulong diffPos0 = 0;
-        ulong diffPos_end = compressedDiff->StreamSize;
-        nuint cacheSize = (temp_cache_end - temp_cache) / ((cached_covers) != null ? (6 - 1) : 6);
-
-        if (cacheSize <= 259)
-        {
-            return 0;
-        }
-
-        ((void)((!!(out_newData != null)) || (_wassert("out_newData!=0", "patch.c", unchecked((uint)(1265))) , 0) != 0));
-        ((void)((!!(out_newData->write != null)) || (_wassert("out_newData->write!=0", "patch.c", unchecked((uint)(1266))) , 0) != 0));
-        ((void)((!!(oldData != null)) || (_wassert("oldData!=0", "patch.c", unchecked((uint)(1267))) , 0) != 0));
-        ((void)((!!(oldData->read != null)) || (_wassert("oldData->read!=0", "patch.c", unchecked((uint)(1268))) , 0) != 0));
-        ((void)((!!(compressedDiff != null)) || (_wassert("compressedDiff!=0", "patch.c", unchecked((uint)(1269))) , 0) != 0));
-        ((void)((!!(compressedDiff->read != null)) || (_wassert("compressedDiff->read!=0", "patch.c", unchecked((uint)(1270))) , 0) != 0));
-
-        {
-            if (read_diffz_head(&diffInfo, &head, compressedDiff) == 0)
-            {
-                return 0;
-            }
-
-            if ((diffInfo.oldDataSize != oldData->StreamSize) || (diffInfo.newDataSize != out_newData->StreamSize))
-            {
-                return 0;
-            }
-
-            if ((decompressPlugin == null) && (diffInfo.compressedCount != 0))
-            {
-                return 0;
-            }
-
-            if ((decompressPlugin) != null && (diffInfo.compressedCount > 0))
-            {
-                if (decompressPlugin->is_can_open(diffInfo.compressType) == 0)
-                {
-                    return 0;
-                }
-            }
-
-            diffPos0 = head.HeadEndPos;
-        }
-
-        for (i = 0; i < unchecked(sizeof(DecompressInputStream) / sizeof(DecompressInputStream)); ++i)
-        {
-            decompressers[i].decompressHandle = null;
-        }
-
-        _TBytesRle_load_stream_init(&rle_loader);
-        if ((cached_covers) != null)
-        {
-            diffPos0 = head.CoverEndPos;
-        }
-        else
-        {
-            if (getStreamClip(&coverClip, &decompressers[0], head.CoverBufSize, head.CompressCoverBufSize, compressedDiff, &diffPos0, decompressPlugin, temp_cache + cacheSize * (6 - 1), cacheSize) == 0)
-            {
-                result = 0;
-                goto clear;
-            }
-
-            ;
-        }
-
-        if (getStreamClip(&rle_loader.ctrlClip, &decompressers[1], head.RleCtrlBufSize, head.CompressRleCtrlBufSize, compressedDiff, &diffPos0, decompressPlugin, temp_cache, cacheSize) == 0)
-        {
-            result = 0;
-            goto clear;
-        }
-
-        ;
-        temp_cache += cacheSize;
-        if (getStreamClip(&rle_loader.rleCodeClip, &decompressers[2], head.RleCodeBufSize, head.CompressRleCodeBufSize, compressedDiff, &diffPos0, decompressPlugin, temp_cache, cacheSize) == 0)
-        {
-            result = 0;
-            goto clear;
-        }
-
-        ;
-        temp_cache += cacheSize;
-        if (getStreamClip(&code_newDataDiffClip, &decompressers[3], head.NewDataDiffSize, head.CompressNewDataDiffSize, compressedDiff, &diffPos0, decompressPlugin, temp_cache, cacheSize) == 0)
-        {
-            result = 0;
-            goto clear;
-        }
-
-        ;
-        temp_cache += cacheSize;
-        if (diffPos0 != diffPos_end)
-        {
-            result = 0;
-            goto clear;
-        }
-
-        ;
-        coverCount = head.CoverCount;
-
-        {
-            Covers covers = new Covers();
-            IHPatchCovers* pcovers = null;
-            OutStreamCache outCache = new OutStreamCache();
-
-            _TOutStreamCache_init(&outCache, out_newData, temp_cache, cacheSize);
-            temp_cache += cacheSize;
-            if ((cached_covers) != null)
-            {
-                pcovers = cached_covers;
-            }
-            else
-            {
-                _covers_init(&covers, coverCount, &coverClip, &coverClip, &coverClip, true);
-                pcovers = &covers.ICovers;
-            }
-
-            result = patchByClip(&outCache, oldData, pcovers, &code_newDataDiffClip, &rle_loader, temp_cache, cacheSize);
-        }
-
-        clear:
-        for (i = 0; i < unchecked(sizeof(DecompressInputStream) / sizeof(DecompressInputStream)); ++i)
-        {
-            if ((decompressers[i].decompressHandle) != null)
-            {
-                if (decompressPlugin->close(decompressPlugin, decompressers[i].decompressHandle) == 0)
-                {
-                    result = 0;
-                }
-
-                decompressers[i].decompressHandle = null;
-            }
-        }
-
-        return result;
-    }
 
     [return: NativeTypeName("hpatch_BOOL")]
     public static int _cache_load_all([NativeTypeName("const hpatch_TStreamInput *")] HPatchStreamInput* data, [NativeTypeName("TByte *")] byte* cache, [NativeTypeName("TByte *")] byte* cache_end)
