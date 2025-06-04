@@ -3,7 +3,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using static Snap.HPatch.TByteRleType;
 
 namespace Snap.HPatch;
 
@@ -51,7 +50,10 @@ public unsafe class BytesRleLoadStream
     private StreamCacheClip ctrlClip;
     private StreamCacheClip rleCodeClip;
 
-    // _TBytesRle_load_stream_init
+    /// <summary>
+    /// _TBytesRle_load_stream_init
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public BytesRleLoadStream()
     {
         ctrlClip = new(null, 0, 0, null, 0);
@@ -64,46 +66,49 @@ public unsafe class BytesRleLoadStream
         this.rleCodeClip = rleCodeClip;
     }
 
-    // _TBytesRle_load_stream_mem_add
-    public bool MemAdd(nuint* decodeSize, byte** outData)
+    /// <summary>
+    /// _TBytesRle_load_stream_mem_add
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public bool MemAdd(ref nuint decodeSize, ref byte* outData)
     {
-        nuint decodeSizeValue = *decodeSize;
-        byte* outDataValue = *outData;
+        nuint decodeSize1 = decodeSize;
+        byte* outData1 = outData;
         StreamCacheClip rleCodeClip = this.rleCodeClip;
-        ulong memSetLength = this.memSetLength;
 
+        ulong memSetLength = this.memSetLength;
         if (memSetLength != 0)
         {
-            nuint memSetStep = ((memSetLength <= decodeSizeValue) ? (nuint)(memSetLength) : decodeSizeValue);
+            nuint memSetStep = ((memSetLength <= decodeSize1) ? (nuint)memSetLength : decodeSize1);
             byte byteSetValue = memSetValue;
 
-            if (outDataValue != null)
+            if (outData1 != null)
             {
                 if (byteSetValue != 0)
                 {
-                    HPatch.memSet_add(outDataValue, byteSetValue, unchecked(memSetStep));
+                    HPatch.memSet_add(outData1, byteSetValue, unchecked(memSetStep));
                 }
 
-                outDataValue += memSetStep;
+                outData1 += memSetStep;
             }
 
-            decodeSizeValue -= memSetStep;
+            decodeSize1 -= memSetStep;
             this.memSetLength = memSetLength - memSetStep;
         }
 
-        while ((memCopyLength > 0) && (decodeSizeValue > 0))
+        while (memCopyLength > 0 && decodeSize1 > 0)
         {
             byte* rleData;
             nuint decodeStep = rleCodeClip.CacheEnd;
 
             if (decodeStep > memCopyLength)
             {
-                decodeStep = (nuint)(memCopyLength);
+                decodeStep = (nuint)memCopyLength;
             }
 
-            if (decodeStep > decodeSizeValue)
+            if (decodeStep > decodeSize1)
             {
-                decodeStep = decodeSizeValue;
+                decodeStep = decodeSize1;
             }
 
             rleData = rleCodeClip.ReadData(decodeStep);
@@ -112,22 +117,25 @@ public unsafe class BytesRleLoadStream
                 return false;
             }
 
-            if ((outDataValue) != null)
+            if (outData1 != null)
             {
-                HPatch.addData(outDataValue, rleData, decodeStep);
-                outDataValue += decodeStep;
+                HPatch.addData(outData1, rleData, decodeStep);
+                outData1 += decodeStep;
             }
 
-            decodeSizeValue -= decodeStep;
+            decodeSize1 -= decodeStep;
             memCopyLength -= decodeStep;
         }
 
-        *decodeSize = decodeSizeValue;
-        *outData = outDataValue;
+        decodeSize = decodeSize1;
+        outData = outData1;
         return true;
     }
 
-    // _TBytesRle_load_stream_isFinish
+    /// <summary>
+    /// _TBytesRle_load_stream_isFinish
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsFinish()
     {
         return memSetLength == 0
@@ -136,28 +144,30 @@ public unsafe class BytesRleLoadStream
             && ctrlClip.IsFinish();
     }
 
-    // _TBytesRle_load_stream_decode_add
-    public bool DecodeAdd(byte* out_data, nuint decodeSize)
+    /// <summary>
+    /// _TBytesRle_load_stream_decode_add
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public bool DecodeAdd(byte* outData, nuint decodeSize)
     {
-        if (!MemAdd(&decodeSize, &out_data))
+        if (!MemAdd(ref decodeSize, ref outData))
         {
             return false;
         }
 
         while ((decodeSize > 0) && !ctrlClip.IsFinish())
         {
-            TByteRleType type;
             ulong length;
-            byte* pType = ctrlClip.AccessData(1);
+            ref readonly byte pType = ref ctrlClip.AccessData(1);
 
-            if (pType == null)
+            if (Unsafe.IsNullRef(in pType))
             {
                 return false;
             }
 
-            type = (TByteRleType)((*pType) >> (8 - 2 /* kByteRleType_bit */));
+            ByteRleType type = (ByteRleType)(pType >> (8 - /* kByteRleType_bit */ 2));
 
-            if (!ctrlClip.UnpackUIntWithTag(&length,2 /*kByteRleType_bit*/))
+            if (!ctrlClip.UnpackUIntWithTag(&length, /*kByteRleType_bit*/ 2))
             {
                 return false;
             }
@@ -165,22 +175,17 @@ public unsafe class BytesRleLoadStream
             ++length;
             switch (type)
             {
-                case kByteRleType_rle0:
-                {
+                case ByteRleType.Rle0:
                     memSetLength = length;
                     memSetValue = 0;
-                }
+                    break;
 
-                break;
-                case kByteRleType_rle255:
-                {
+                case ByteRleType.Rle255:
                     memSetLength = length;
                     memSetValue = 255;
-                }
+                    break;
 
-                break;
-                case kByteRleType_rle:
-                {
+                case ByteRleType.Rle:
                     byte* pSetValue = rleCodeClip.ReadData(1);
 
                     if (pSetValue == null)
@@ -190,39 +195,46 @@ public unsafe class BytesRleLoadStream
 
                     memSetValue = *pSetValue;
                     memSetLength = length;
-                }
+                    break;
 
-                break;
-                case kByteRleType_unrle:
-                {
+                case ByteRleType.Unrle:
                     memCopyLength = length;
-                }
-
-                break;
+                    break;
             }
 
-            if (!MemAdd(&decodeSize, &out_data))
+            if (!MemAdd(ref decodeSize, ref outData))
             {
                 return false;
             }
         }
 
-        return decodeSize == 0;
+        return decodeSize is 0;
     }
 
-    // _rle_decode_skip
-    public bool DecodeSkip(ulong copyLength)
+    /// <summary>
+    /// _TBytesRle_load_stream_decode_skip
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool DecodeSkip(nuint decodeSize)
+    {
+        return DecodeAdd(null, decodeSize);
+    }
+
+    /// <summary>
+    /// _rle_decode_skip
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public bool RleDecodeSkip(ulong copyLength)
     {
         while (copyLength > 0)
         {
-            nuint len = (~(nuint)(0));
-
+            nuint len = ~(nuint)0;
             if (len > copyLength)
             {
                 len = (nuint)(copyLength);
             }
 
-            if (!DecodeAdd(null, len))
+            if (!DecodeSkip(len))
             {
                 return false;
             }
@@ -239,37 +251,39 @@ public unsafe class Covers : IHPatchCovers
     protected ulong coverCount;
     private ulong oldPosBack;
     private ulong newPosBack;
-    protected StreamCacheClip code_inc_oldPosClip;
-    protected StreamCacheClip code_inc_newPosClip;
-    protected StreamCacheClip code_lengthsClip;
-    protected int isOldPosBackNeedAddLength;
+    protected StreamCacheClip codeIncOldPosClip;
+    protected StreamCacheClip codeIncNewPosClip;
+    protected StreamCacheClip codeLengthsClip;
+    protected bool isOldPosBackNeedAddLength;
 
-    protected Covers()
-    {
-        newPosBack = 0;
-        oldPosBack = 0;
-        isOldPosBackNeedAddLength = 0;
-    }
-
-    // _covers_init
-    public Covers(ulong coverCount, StreamCacheClip code_inc_oldPosClip, StreamCacheClip code_inc_newPosClip, StreamCacheClip code_lengthsClip, int isOldPosBackNeedAddLength)
+    /// <summary>
+    /// _covers_init
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Covers(ulong coverCount, StreamCacheClip codeIncOldPosClip, StreamCacheClip codeIncNewPosClip, StreamCacheClip codeLengthsClip, bool isOldPosBackNeedAddLength)
     {
         this.coverCount = coverCount;
         newPosBack = 0;
         oldPosBack = 0;
-        this.code_inc_oldPosClip = code_inc_oldPosClip;
-        this.code_inc_newPosClip = code_inc_newPosClip;
-        this.code_lengthsClip = code_lengthsClip;
+        this.codeIncOldPosClip = codeIncOldPosClip;
+        this.codeIncNewPosClip = codeIncNewPosClip;
+        this.codeLengthsClip = codeLengthsClip;
         this.isOldPosBackNeedAddLength = isOldPosBackNeedAddLength;
     }
 
-    // _covers_leaveCoverCount
+    /// <summary>
+    /// _covers_leaveCoverCount
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public ulong LeaveCoverCount()
     {
         return coverCount;
     }
 
-    // _covers_read_cover
+    /// <summary>
+    /// _covers_read_cover
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public bool ReadCover([NotNullWhen(true)] out HPatchCover? cover)
     {
         cover = default;
@@ -288,39 +302,40 @@ public unsafe class Covers : IHPatchCovers
         }
 
         {
-            ulong copyLength, coverLength, oldPos, inc_oldPos;
-            byte inc_oldPos_sign;
-            byte* pSign = code_inc_oldPosClip.AccessData(1);
+            ulong copyLength, coverLength, oldPos, incOldPos;
+            byte incOldPosSign;
+            ref readonly byte pSign = ref codeIncOldPosClip.AccessData(1);
 
-            if ((pSign) != null)
+            if (!Unsafe.IsNullRef(in pSign))
             {
-                inc_oldPos_sign = unchecked((byte)((*pSign) >> (8 - 1 /*kSignTagBit*/)));
+                incOldPosSign = unchecked((byte)(pSign >> (8 - /*kSignTagBit*/ 1)));
             }
             else
             {
                 return false;
             }
 
-            if (!code_inc_oldPosClip.UnpackUIntWithTag(&inc_oldPos, 1/*kSignTagBit*/))
+            if (!codeIncOldPosClip.UnpackUIntWithTag(&incOldPos, 1/*kSignTagBit*/))
             {
                 return false;
             }
 
-            oldPos = (inc_oldPos_sign == 0) ? (oldPosBack + inc_oldPos) : (oldPosBack - inc_oldPos);
+            oldPos = (incOldPosSign == 0) ? (oldPosBack + incOldPos) : (oldPosBack - incOldPos);
 
-            if (!code_inc_newPosClip.UnpackUIntWithTag(&copyLength, 0))
+            if (!codeIncNewPosClip.UnpackUIntWithTag(&copyLength, 0))
             {
                 return false;
             }
 
-            if (!code_lengthsClip.UnpackUIntWithTag(&coverLength, 0))
+            if (!codeLengthsClip.UnpackUIntWithTag(&coverLength, 0))
             {
                 return false;
             }
 
             newPosBack += copyLength;
             oldPosBack = oldPos;
-            oldPosBack += (isOldPosBackNeedAddLength) != 0 ? coverLength : 0;
+            oldPosBack += isOldPosBackNeedAddLength ? coverLength : 0;
+
             cover = new(oldPos, newPosBack, coverLength);
             newPosBack += coverLength;
         }
@@ -330,44 +345,52 @@ public unsafe class Covers : IHPatchCovers
         return true;
     }
 
-    // _covers_is_finish
+    /// <summary>
+    /// _covers_is_finish
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public bool IsFinish()
     {
-        return code_lengthsClip.IsFinish()
-            && code_inc_newPosClip.IsFinish()
-            && code_inc_oldPosClip.IsFinish();
+        return codeLengthsClip.IsFinish()
+            && codeIncNewPosClip.IsFinish()
+            && codeIncOldPosClip.IsFinish();
     }
 }
 
 public unsafe class PackedCovers : Covers
 {
-    // _packedCovers_open
-    public PackedCovers(HDiffHead out_diffHead, HPatchStreamInput serializedDiff, byte* temp_cache, byte* temp_cache_end)
+    // Used in _packedCovers_open
+    private PackedCovers(HDiffHead diffHead, StreamCacheClip codeLengthsClip, StreamCacheClip codeIncNewPosClip, StreamCacheClip codeIncOldPosClip)
+        : base(diffHead.CoverCount, codeIncOldPosClip, codeIncNewPosClip, codeLengthsClip, false)
     {
-        nuint cacheSize = unchecked((nuint)(temp_cache_end - temp_cache) / 3);
+    }
 
+    /// <summary>
+    /// _packedCovers_open
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public static bool Open([NotNullWhen(true)] out PackedCovers? self, out HDiffHead diffHead, HPatchStreamInput serializedDiff, byte* tempCache, byte* tempCacheEnd)
+    {
+        nuint cacheSize = unchecked((nuint)(tempCacheEnd - tempCache) / 3);
+        if (!HDiffHead.ReadDiffHead(out diffHead, serializedDiff))
         {
-            ulong diffPos0;
-
-            if (!out_diffHead.ReadDiffHead(serializedDiff))
-            {
-                throw new InvalidOperationException();
-            }
-
-            diffPos0 = out_diffHead.HeadEndPos;
-            code_lengthsClip = new(serializedDiff, diffPos0, diffPos0 + out_diffHead.LengthSize, temp_cache, cacheSize);
-            temp_cache += cacheSize;
-
-            diffPos0 += out_diffHead.LengthSize;
-            code_inc_newPosClip = new(serializedDiff, diffPos0, diffPos0 + out_diffHead.IncNewPosSize, temp_cache, cacheSize);
-            temp_cache += cacheSize;
-
-            diffPos0 += out_diffHead.IncNewPosSize;
-            code_inc_oldPosClip = new(serializedDiff, diffPos0, diffPos0 + out_diffHead.IncOldPosSize, temp_cache, cacheSize);
+            self = default;
+            return false;
         }
 
-        // _covers_init(&self->base, out_diffHead->coverCount, &self->code_inc_oldPosClip, &self->code_inc_newPosClip, &self->code_lengthsClip, 0);
-        coverCount = out_diffHead.CoverCount;
+        ulong diffPos0 = diffHead.HeadEndPos;
+        StreamCacheClip codeLengthsClip = new(serializedDiff, diffPos0, diffPos0 + diffHead.LengthSize, tempCache, cacheSize);
+        tempCache += cacheSize;
+
+        diffPos0 += diffHead.LengthSize;
+        StreamCacheClip codeIncNewPosClip = new(serializedDiff, diffPos0, diffPos0 + diffHead.IncNewPosSize, tempCache, cacheSize);
+        tempCache += cacheSize;
+
+        diffPos0 += diffHead.IncNewPosSize;
+        StreamCacheClip codeIncOldPosClip = new(serializedDiff, diffPos0, diffPos0 + diffHead.IncOldPosSize, tempCache, cacheSize);
+
+        self = new(diffHead, codeLengthsClip, codeIncNewPosClip, codeIncOldPosClip);
+        return true;
     }
 }
 
@@ -387,13 +410,23 @@ public unsafe class HDiffHead
 
     public ulong CoverEndPos { get; private set; }
 
-    // read_diff_head
-    public bool ReadDiffHead(HPatchStreamInput serializedDiff)
+    // Used in read_diff_head
+    private HDiffHead()
+    {
+    }
+
+    /// <summary>
+    /// read_diff_head
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public static bool ReadDiffHead(out HDiffHead diffHead, HPatchStreamInput serializedDiff)
     {
         ulong diffPos0;
-        ulong diffPos_end = serializedDiff.StreamSize;
-        byte* temp_cache = stackalloc byte[1024 * 4]; // TODO
-        StreamCacheClip diffHeadClip = new(serializedDiff, 0, diffPos_end, temp_cache, (1024 * 4));
+        ulong diffPosEnd = serializedDiff.StreamSize;
+        byte* tempCache = stackalloc byte[1024 * 4]; // TODO
+        StreamCacheClip diffHeadClip = new(serializedDiff, 0, diffPosEnd, tempCache, (1024 * 4));
+
+        diffHead = new();
 
         ulong value;
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
@@ -401,58 +434,58 @@ public unsafe class HDiffHead
             return false;
         }
 
-        CoverCount = value;
+        diffHead.CoverCount = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        LengthSize = value;
+        diffHead.LengthSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        IncNewPosSize = value;
+        diffHead.IncNewPosSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        IncOldPosSize = value;
+        diffHead.IncOldPosSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        NewDataDiffSize = value;
+        diffHead.NewDataDiffSize = value;
 
         diffPos0 = diffHeadClip.ReadPosOfSrcStream();
-        HeadEndPos = diffPos0;
-        if (LengthSize > unchecked((ulong)(diffPos_end - diffPos0)))
+        diffHead.HeadEndPos = diffPos0;
+        if (diffHead.LengthSize > unchecked((ulong)(diffPosEnd - diffPos0)))
         {
             return false;
         }
 
-        diffPos0 += LengthSize;
-        if (IncNewPosSize > unchecked((ulong)(diffPos_end - diffPos0)))
+        diffPos0 += diffHead.LengthSize;
+        if (diffHead.IncNewPosSize > unchecked((ulong)(diffPosEnd - diffPos0)))
         {
             return false;
         }
 
-        diffPos0 += IncNewPosSize;
-        if (IncOldPosSize > unchecked((ulong)(diffPos_end - diffPos0)))
+        diffPos0 += diffHead.IncNewPosSize;
+        if (diffHead.IncOldPosSize > unchecked((ulong)(diffPosEnd - diffPos0)))
         {
             return false;
         }
 
-        diffPos0 += IncOldPosSize;
-        CoverEndPos = diffPos0;
-        if (NewDataDiffSize > unchecked((ulong)(diffPos_end - diffPos0)))
+        diffPos0 += diffHead.IncOldPosSize;
+        diffHead.CoverEndPos = diffPos0;
+        if (diffHead.NewDataDiffSize > unchecked((ulong)(diffPosEnd - diffPos0)))
         {
             return false;
         }
@@ -568,15 +601,15 @@ public unsafe partial struct hpatch_TCoverList
     public fixed byte _buf[16384];
 }
 
-public enum TByteRleType
+public enum ByteRleType
 {
-    kByteRleType_rle0 = 0,
-    kByteRleType_rle255 = 1,
-    kByteRleType_rle = 2,
-    kByteRleType_unrle = 3,
+    Rle0 = 0,
+    Rle255 = 1,
+    Rle = 2,
+    Unrle = 3,
 }
 
-public unsafe class HDiffzHead
+public class HDiffzHead
 {
     public ulong CoverCount { get; set; }
 
@@ -608,21 +641,25 @@ public unsafe class HDiffzHead
 public unsafe class StreamCacheClip
 {
     public ulong StreamPos { get; private set; }
+
     public ulong StreamPosEnd { get; private set; }
-    private HPatchStreamInput srcStream;
-    private byte* cacheBuf;
+
+    private readonly HPatchStreamInput? srcStream;
+    private readonly byte* cacheBuf;
+
     public nuint CacheBegin { get; private set; }
 
     public nuint CacheEnd { get; private set; }
 
     // _TStreamCacheClip_init
-    public StreamCacheClip(HPatchStreamInput srcStream, ulong streamPos, ulong streamPos_end, byte* aCache, nuint cacheSize)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public StreamCacheClip(HPatchStreamInput? srcStream, ulong streamPos, ulong streamPosEnd, byte* aCache, nuint cacheSize)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(streamPos, streamPos_end);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(streamPos_end, srcStream?.StreamSize ?? 0);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(streamPos, streamPosEnd);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(streamPosEnd, srcStream?.StreamSize ?? 0);
 
         StreamPos = streamPos;
-        StreamPosEnd = streamPos_end;
+        StreamPosEnd = streamPosEnd;
         this.srcStream = srcStream;
         cacheBuf = aCache;
         CacheBegin = cacheSize;
@@ -630,77 +667,78 @@ public unsafe class StreamCacheClip
     }
 
     // _TStreamCacheClip_isFinish
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsFinish()
     {
         return 0 == LeaveSize();
     }
 
     // _TStreamCacheClip_isCacheEmpty
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsCacheEmpty()
     {
         return CacheBegin == CacheEnd;
     }
 
     // _TStreamCacheClip_cachedSize
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public nuint CachedSize()
     {
         return CacheEnd - CacheBegin;
     }
 
     // _TStreamCacheClip_leaveSize
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public nuint LeaveSize()
     {
         return unchecked((nuint)(StreamPosEnd - StreamPos)) + CachedSize();
     }
 
     // _TStreamCacheClip_readPosOfSrcStream
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public nuint ReadPosOfSrcStream()
     {
         return unchecked((nuint)StreamPos) - CachedSize();
     }
 
-    // _TStreamCacheClip_readType_end
+    /// <summary>
+    /// _TStreamCacheClip_readType_end
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public bool ReadTypeEnd(byte endTag, out string type)
     {
-        byte* type_begin;
-        nuint i;
-        nuint readLen = 259 + 1;
+        nuint readLen = /* hpatch_kMaxPluginTypeLength */ 259 + 1;
 
-        if (readLen > unchecked((ulong)(StreamPosEnd - StreamPos) + (ulong)((nuint)(CacheEnd - CacheBegin))))
+        if (readLen > LeaveSize())
         {
-            readLen = (nuint)((ulong)(StreamPosEnd - StreamPos) + (ulong)((nuint)(CacheEnd - CacheBegin)));
+            readLen = LeaveSize();
         }
 
-        type_begin = AccessData(readLen);
-        if (type_begin == null)
+        ref readonly byte typeBegin = ref AccessData(readLen);
+        if (Unsafe.IsNullRef(in typeBegin))
         {
             type = default!;
             return false;
         }
 
-        byte* outType = stackalloc byte[260];
-
-        for (i = 0; i < readLen; ++i)
+        ReadOnlySpan<byte> typeSpan = MemoryMarshal.CreateReadOnlySpan(in typeBegin, unchecked((int)readLen));
+        int i = typeSpan.IndexOf(endTag);
+        if (i < 0)
         {
-            if (type_begin[i] != endTag)
-            {
-                continue;
-            }
-            else
-            {
-                Unsafe.CopyBlockUnaligned(outType, type_begin, unchecked((uint)i));
-                // out_type[i] = (sbyte)('\0');
-                type = Encoding.UTF8.GetString(MemoryMarshal.CreateReadOnlySpanFromNullTerminated(outType));
-                CacheBegin += i + 1;
-                return true;
-            }
+            type = default!;
+            return false;
         }
 
-        type = default!;
+        type = Encoding.UTF8.GetString(typeSpan[..i]);
+        SkipDataNoCheck(unchecked((nuint)(i + 1)));
+
         return false;
     }
 
-    // _TStreamCacheClip_updateCache
+    /// <summary>
+    /// _TStreamCacheClip_updateCache
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public bool UpdateCache()
     {
         byte* buf0 = &cacheBuf[0];
@@ -717,9 +755,9 @@ public unsafe class StreamCacheClip
             return true;
         }
 
-        if (CacheBegin != CacheEnd)
+        if (!IsCacheEmpty())
         {
-            Buffer.MemoryCopy(buf0 + CacheBegin, buf0 + (CacheBegin - readSize), CacheEnd - CacheBegin, CacheEnd - CacheBegin);
+            HPatch.MemMove(buf0 + (CacheBegin - readSize), buf0 + CacheBegin, CachedSize());
         }
 
         if (!srcStream.Read(StreamPos, buf0 + (CacheEnd - readSize), buf0 + CacheEnd))
@@ -732,27 +770,32 @@ public unsafe class StreamCacheClip
         return true;
     }
 
-    // _TStreamCacheClip_skipData_noCheck
+    /// <summary>
+    /// _TStreamCacheClip_skipData_noCheck
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SkipDataNoCheck(nuint skipSize)
     {
         CacheBegin += skipSize;
     }
 
-    // _TStreamCacheClip_skipData
+    /// <summary>
+    /// _TStreamCacheClip_skipData
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public bool SkipData(ulong skipLongSize)
     {
         while (skipLongSize > 0)
         {
             nuint len = CacheEnd;
-
             if (len > skipLongSize)
             {
                 len = (nuint)(skipLongSize);
             }
 
-            if (AccessData(len) != null)
+            if (!Unsafe.IsNullRef(in AccessData(len)))
             {
-                CacheBegin += len;
+                SkipDataNoCheck(len);
                 skipLongSize -= len;
             }
             else
@@ -767,28 +810,28 @@ public unsafe class StreamCacheClip
     // _TStreamCacheClip_unpackUIntWithTag
     public bool UnpackUIntWithTag(ulong* result, uint kTagBit)
     {
-        byte* curCode, codeBegin;
-        nuint readSize = ((8 * 8 + 6) / 7 + 1);
-        ulong dataSize = ((ulong)(StreamPosEnd - StreamPos) + (ulong)((nuint)(CacheEnd - CacheBegin)));
+        nuint readSize = /* hpatch_kMaxPackedUIntBytes */ ((8 * 8 + 6) / 7 + 1);
+        ulong dataSize = LeaveSize();
 
         if (readSize > dataSize)
         {
             readSize = (nuint)(dataSize);
         }
 
-        codeBegin = AccessData(readSize);
-        if (codeBegin == null)
+        ref byte codeBegin = ref AccessData(readSize);
+        if (Unsafe.IsNullRef(in codeBegin))
         {
             return false;
         }
 
-        curCode = codeBegin;
-        if (HPatch.hpatch_unpackUIntWithTag(unchecked((byte**)(&curCode)), codeBegin + readSize, result, kTagBit) == 0)
+        ref byte curCode = ref codeBegin;
+        byte* p = (byte*)Unsafe.AsPointer(ref curCode);
+        if (HPatch.hpatch_unpackUIntWithTag(in p, codeBegin + readSize, result, kTagBit) == 0)
         {
             return false;
         }
 
-        CacheBegin += (nuint)(curCode - codeBegin);
+        SkipDataNoCheck((nuint)(curCode - codeBegin));
         return true;
     }
 
@@ -859,23 +902,26 @@ public unsafe class StreamCacheClip
         return result;
     }
 
-    // _TStreamCacheClip_accessData
-    public byte* AccessData([NativeTypeName("hpatch_size_t")] nuint readSize)
+    /// <summary>
+    /// _TStreamCacheClip_accessData
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref byte AccessData(nuint readSize)
     {
-        if (readSize > unchecked((nuint)(CacheEnd - CacheBegin)))
+        if (readSize > CachedSize())
         {
             if (!UpdateCache())
             {
-                return null;
+                return ref Unsafe.NullRef<byte>();
             }
 
             if (readSize > CachedSize())
             {
-                return null;
+                return ref Unsafe.NullRef<byte>();
             }
         }
 
-        return &cacheBuf[CacheBegin];
+        return ref cacheBuf[CacheBegin];
     }
 }
 
@@ -1465,67 +1511,55 @@ public unsafe class HPatchStreamOutput : HPatchStreamInput
     }
 
     // _patch_decompress_cache
-    public bool PatchDecompressCache(HPatchStreamInput once_in_newData, HPatchStreamInput oldData, HPatchStreamInput compressedDiff, HPatchDecompress decompressPlugin, IHPatchCovers cached_covers, byte* temp_cache, byte* temp_cache_end)
+    public bool PatchDecompressCache(HPatchStreamInput once_in_newData, HPatchStreamInput oldData, HPatchStreamInput compressedDiff, HPatchDecompress? decompressPlugin, IHPatchCovers? cached_covers, byte* temp_cache, byte* temp_cache_end)
     {
-        StreamCacheClip coverClip = new StreamCacheClip();
-        StreamCacheClip code_newDataDiffClip = new StreamCacheClip();
-        BytesRleLoadStream rle_loader = new BytesRleLoadStream();
-        HDiffzHead head = new HDiffzHead();
-        HPatchCompressedDiffInfo diffInfo = new HPatchCompressedDiffInfo();
-        DecompressInputStream[] decompressers = new DecompressInputStream();
+        StreamCacheClip coverClip;
+        StreamCacheClip code_newDataDiffClip;
+        BytesRleLoadStream rle_loader;
+        HPatchCompressedDiffInfo diffInfo = new();
+        DecompressInputStream[] decompressers = new DecompressInputStream[4];
         nuint i;
         ulong coverCount;
-        int result = true;
+        bool result = true;
         ulong diffPos0 = 0;
-        ulong diffPos_end = compressedDiff->StreamSize;
-        nuint cacheSize = (temp_cache_end - temp_cache) / ((cached_covers) != null ? (6 - 1) : 6);
+        ulong diffPos_end = compressedDiff.StreamSize;
+        nuint cacheSize = unchecked((nuint)((temp_cache_end - temp_cache) / (cached_covers != null ? (6 - 1) : 6)));
 
         if (cacheSize <= 259)
         {
             return false;
         }
 
-        ((void)((!!(out_newData != null)) || (_wassert("out_newData!=0", "patch.c", unchecked((uint)(1265))) , 0) != 0));
-        ((void)((!!(out_newData->write != null)) || (_wassert("out_newData->write!=0", "patch.c", unchecked((uint)(1266))) , 0) != 0));
-        ((void)((!!(oldData != null)) || (_wassert("oldData!=0", "patch.c", unchecked((uint)(1267))) , 0) != 0));
-        ((void)((!!(oldData->read != null)) || (_wassert("oldData->read!=0", "patch.c", unchecked((uint)(1268))) , 0) != 0));
-        ((void)((!!(compressedDiff != null)) || (_wassert("compressedDiff!=0", "patch.c", unchecked((uint)(1269))) , 0) != 0));
-        ((void)((!!(compressedDiff->read != null)) || (_wassert("compressedDiff->read!=0", "patch.c", unchecked((uint)(1270))) , 0) != 0));
+        ArgumentNullException.ThrowIfNull(oldData);
+        ArgumentNullException.ThrowIfNull(compressedDiff);
 
+        if (!diffInfo.ReadDiffzHead(out HDiffzHead? head, compressedDiff))
         {
-            if (read_diffz_head(&diffInfo, &head, compressedDiff) == 0)
-            {
-                return 0;
-            }
-
-            if ((diffInfo.oldDataSize != oldData->StreamSize) || (diffInfo.newDataSize != out_newData->StreamSize))
-            {
-                return 0;
-            }
-
-            if ((decompressPlugin == null) && (diffInfo.compressedCount != 0))
-            {
-                return 0;
-            }
-
-            if ((decompressPlugin) != null && (diffInfo.compressedCount > 0))
-            {
-                if (decompressPlugin->is_can_open(diffInfo.compressType) == 0)
-                {
-                    return 0;
-                }
-            }
-
-            diffPos0 = head.HeadEndPos;
+            return false;
         }
 
-        for (i = 0; i < unchecked(sizeof(DecompressInputStream) / sizeof(DecompressInputStream)); ++i)
+        if ((diffInfo.OldDataSize != oldData.StreamSize) || (diffInfo.NewDataSize != StreamSize))
         {
-            decompressers[i].decompressHandle = null;
+            return false;
         }
 
-        _TBytesRle_load_stream_init(&rle_loader);
-        if ((cached_covers) != null)
+        if ((decompressPlugin == null) && (diffInfo.CompressedCount != 0))
+        {
+            return false;
+        }
+
+        if ((decompressPlugin) != null && (diffInfo.CompressedCount > 0))
+        {
+            if (decompressPlugin.is_can_open(diffInfo.CompressType) == 0)
+            {
+                return false;
+            }
+        }
+
+        diffPos0 = head.HeadEndPos;
+
+        rle_loader = new();
+        if (cached_covers != null)
         {
             diffPos0 = head.CoverEndPos;
         }
@@ -1614,53 +1648,55 @@ public unsafe class HPatchStreamOutput : HPatchStreamInput
 
 public unsafe class HPatchCompressedDiffInfo
 {
-    private ulong newDataSize;
-    private ulong oldDataSize;
-    private uint compressedCount;
-    private string compressType;
+    public ulong NewDataSize { get; private set; }
+
+    public ulong OldDataSize { get; private set; }
+
+    public uint CompressedCount { get; private set; }
+
+    public string CompressType { get; private set; }
+
+    public HPatchCompressedDiffInfo()
+    {
+    }
 
     // getCompressedDiffInfo
     public HPatchCompressedDiffInfo(HPatchStreamInput compressedDiff)
     {
-        HDiffzHead head = new HDiffzHead();
-
         ArgumentNullException.ThrowIfNull(compressedDiff);
-        if (!ReadDiffzHead(head, compressedDiff))
+        if (!ReadDiffzHead(out _, compressedDiff))
         {
             throw new InvalidOperationException();
         }
     }
 
     // read_diffz_head
-    [MemberNotNull(nameof(compressType))]
-    public bool ReadDiffzHead(HDiffzHead out_head, HPatchStreamInput compressedDiff)
+    [MemberNotNull(nameof(CompressType))]
+    public bool ReadDiffzHead(out HDiffzHead head, HPatchStreamInput compressedDiff)
     {
         StreamCacheClip diffHeadClip;
         byte* temp_cache = stackalloc byte [1024 * 4]; // TODO
 
         diffHeadClip = new(compressedDiff, 0, compressedDiff.StreamSize, temp_cache, (1024 * 4));
 
-        {
-            if (!diffHeadClip.ReadTypeEnd("&"u8[0], out compressType))
-            {
-                return false;
-            }
+        head = new();
 
-            if (!string.Equals(compressType, "HDIFF13", StringComparison.Ordinal))
-            {
-                return false;
-            }
+        if (!diffHeadClip.ReadTypeEnd("&"u8[0], out CompressType))
+        {
+            return false;
         }
 
-
+        if (!string.Equals(CompressType, "HDIFF13", StringComparison.Ordinal))
         {
-            if (!diffHeadClip.ReadTypeEnd("\0"u8[0], out compressType))
-            {
-                return false;
-            }
-
-            out_head.TypesEndPos = (diffHeadClip.StreamPos - ((nuint)((diffHeadClip).CacheEnd - (diffHeadClip).CacheBegin)));
+            return false;
         }
+
+        if (!diffHeadClip.ReadTypeEnd("\0"u8[0], out CompressType))
+        {
+            return false;
+        }
+
+        head.TypesEndPos = (diffHeadClip.StreamPos - ((nuint)((diffHeadClip).CacheEnd - (diffHeadClip).CacheBegin)));
 
         ulong value;
 
@@ -1669,89 +1705,89 @@ public unsafe class HPatchCompressedDiffInfo
             return false;
         }
 
-        newDataSize = value;
+        NewDataSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        oldDataSize = value;
+        OldDataSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        out_head.CoverCount = value;
+        head.CoverCount = value;
 
-        out_head.CompressSizeBeginPos = ((diffHeadClip).StreamPos - ((nuint)((diffHeadClip).CacheEnd - (diffHeadClip).CacheBegin)));
-
-        if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
-        {
-            return false;
-        }
-
-        out_head.CoverBufSize = value;
+        head.CompressSizeBeginPos = ((diffHeadClip).StreamPos - ((nuint)((diffHeadClip).CacheEnd - (diffHeadClip).CacheBegin)));
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        out_head.CompressCoverBufSize = value;
+        head.CoverBufSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        out_head.RleCtrlBufSize = value;
+        head.CompressCoverBufSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        out_head.CompressRleCtrlBufSize = value;
+        head.RleCtrlBufSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        out_head.RleCodeBufSize = value;
+        head.CompressRleCtrlBufSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        out_head.CompressRleCodeBufSize = value;
+        head.RleCodeBufSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        out_head.NewDataDiffSize = value;
+        head.CompressRleCodeBufSize = value;
 
         if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
             return false;
         }
 
-        out_head.CompressNewDataDiffSize = value;
+        head.NewDataDiffSize = value;
 
-        out_head.HeadEndPos = ((diffHeadClip).StreamPos - ((nuint)((diffHeadClip).CacheEnd - (diffHeadClip).CacheBegin)));
-        compressedCount = ((out_head.CompressCoverBufSize) != 0 ? 1U : 0U) + ((out_head.CompressRleCtrlBufSize) != 0 ? 1U : 0U) + ((out_head.CompressRleCodeBufSize) != 0 ? 1U : 0U) + ((out_head.CompressNewDataDiffSize) != 0 ? 1U : 0U);
-        if (out_head.CompressCoverBufSize > 0)
+        if (!diffHeadClip.UnpackUIntWithTag(&value, 0))
         {
-            out_head.CoverEndPos = out_head.HeadEndPos + out_head.CompressCoverBufSize;
+            return false;
+        }
+
+        head.CompressNewDataDiffSize = value;
+
+        head.HeadEndPos = ((diffHeadClip).StreamPos - ((nuint)((diffHeadClip).CacheEnd - (diffHeadClip).CacheBegin)));
+        CompressedCount = ((head.CompressCoverBufSize) != 0 ? 1U : 0U) + ((head.CompressRleCtrlBufSize) != 0 ? 1U : 0U) + ((head.CompressRleCodeBufSize) != 0 ? 1U : 0U) + ((head.CompressNewDataDiffSize) != 0 ? 1U : 0U);
+        if (head.CompressCoverBufSize > 0)
+        {
+            head.CoverEndPos = head.HeadEndPos + head.CompressCoverBufSize;
         }
         else
         {
-            out_head.CoverEndPos = out_head.HeadEndPos + out_head.CoverBufSize;
+            head.CoverEndPos = head.HeadEndPos + head.CoverBufSize;
         }
 
         return true;
@@ -1770,7 +1806,7 @@ public enum hpatch_dec_error_t
 public unsafe class HPatchDecompress
 {
     [NativeTypeName("hpatch_BOOL (*)(const char *)")]
-    public delegate*<sbyte*, int> is_can_open;
+    public delegate*<string, int> is_can_open;
 
     [NativeTypeName("hpatch_decompressHandle (*)(struct hpatch_TDecompress *, hpatch_StreamPos_t, const struct hpatch_TStreamInput *, hpatch_StreamPos_t, hpatch_StreamPos_t)")]
     public delegate*<ulong, HPatchStreamInput, ulong, ulong, void*> open;
@@ -1881,6 +1917,7 @@ public partial class HPatchCover
     {
     }
 
+    // Used in _covers_read_cover
     public HPatchCover(ulong oldPos, ulong newPos, ulong length)
     {
         this.OldPos = oldPos;
@@ -2015,6 +2052,11 @@ public unsafe partial struct sspatch_covers_t
 
 public static unsafe partial class HPatch
 {
+    internal static void MemMove(void* dst, void* src, ulong length)
+    {
+        Buffer.MemoryCopy(src, dst, length, length);
+    }
+
     [return: NativeTypeName("hpatch_BOOL")]
     public static int hpatch_packUIntWithTag([NativeTypeName("TByte **")] byte** out_code, [NativeTypeName("TByte *")] byte* out_code_end, [NativeTypeName("hpatch_StreamPos_t")] ulong uValue, [NativeTypeName("hpatch_uint")] uint highTag, [NativeTypeName("const hpatch_uint")] uint kTagBit)
     {
@@ -2065,43 +2107,44 @@ public static unsafe partial class HPatch
     }
 
     [return: NativeTypeName("hpatch_BOOL")]
-    public static int hpatch_unpackUIntWithTag([NativeTypeName("const TByte **")] byte** src_code, [NativeTypeName("const TByte *")] byte* src_code_end, [NativeTypeName("hpatch_StreamPos_t *")] ulong* result, [NativeTypeName("const hpatch_uint")] uint kTagBit)
+    public static bool hpatch_unpackUIntWithTag(ref readonly byte* srcCode, ref byte srcCodeEnd, ulong* result, uint kTagBit)
     {
         ulong value;
         byte code;
-        byte* pcode = *src_code;
+        ref readonly byte pcode = ref *srcCode;
 
-        if (src_code_end <= pcode)
+        if (Unsafe.IsAddressGreaterThan(in pcode, in srcCodeEnd))
         {
-            return 0;
+            return false;
         }
 
-        code = *pcode;
+        code = pcode;
         ++pcode;
-        value = code & ((1 << (7 - kTagBit)) - 1);
-        if ((code & (1 << (7 - kTagBit))) != 0)
+        Unsafe.AddByteOffset(ref pcode, 1);
+        value = unchecked((ulong)(code & ((1 << unchecked((int)(7 - kTagBit))) - 1)));
+        if ((code & (1 << unchecked((int)(7 - kTagBit)))) != 0)
         {
             do
             {
                 if (unchecked(value >> (sizeof(ulong) * 8 - 7)) != 0)
                 {
-                    return 0;
+                    return false;
                 }
 
-                if (src_code_end == pcode)
+                if (Unsafe.AreSame(in srcCodeEnd, in *pcode))
                 {
-                    return 0;
+                    return false;
                 }
 
                 code = *pcode;
                 ++pcode;
-                value = (value << 7) | (code & ((1 << 7) - 1));
+                value = (value << 7) | unchecked((uint)(code & ((1 << 7) - 1)));
             }
             while ((code & (1 << 7)) != 0);
 
         }
 
-        (*src_code) = pcode;
+        srcCode = pcode;
         *result = value;
         return true;
     }
@@ -2134,7 +2177,7 @@ public static unsafe partial class HPatch
         ctrlBuf_end = rle_code;
         while (ctrlBuf_end - ctrlBuf > 0)
         {
-            TByteRleType type = (TByteRleType)((*ctrlBuf) >> (8 - kByteRleType_bit));
+            ByteRleType type = (ByteRleType)((*ctrlBuf) >> (8 - kByteRleType_bit));
             nuint length;
 
             do
@@ -2154,21 +2197,21 @@ public static unsafe partial class HPatch
             ++length;
             switch (type)
             {
-                case kByteRleType_rle0:
+                case Rle0:
                 {
                     Unsafe.InitBlockUnaligned(out_data, 0, length);
                     out_data += length;
                 }
 
                 break;
-                case kByteRleType_rle255:
+                case Rle255:
                 {
                     Unsafe.InitBlockUnaligned(out_data, 255, length);
                     out_data += length;
                 }
 
                 break;
-                case kByteRleType_rle:
+                case Rle:
                 {
                     if (1 > unchecked((nuint)(rle_code_end - rle_code)))
                     {
@@ -2181,7 +2224,7 @@ public static unsafe partial class HPatch
                 }
 
                 break;
-                case kByteRleType_unrle:
+                case Unrle:
                 {
                     if (length > unchecked((nuint)(rle_code_end - rle_code)))
                     {
@@ -2584,7 +2627,7 @@ public static unsafe partial class HPatch
                 return 0;
             }
 
-            if (decompressPlugin->is_can_open(out_diffInfo->compressType) == 0)
+            if (decompressPlugin->is_can_open(out_diffInfo->CompressType) == 0)
             {
                 return 0;
             }
@@ -3276,7 +3319,7 @@ public static unsafe partial class HPatch
                     return 0;
                 }
 
-                if ((oldData->StreamSize != diffInfo.oldDataSize) || (newDataSize != diffInfo.newDataSize))
+                if ((oldData->StreamSize != diffInfo.OldDataSize) || (newDataSize != diffInfo.NewDataSize))
                 {
                     *out_isReadError = true;
                     return 0;
@@ -3284,7 +3327,7 @@ public static unsafe partial class HPatch
 
                 temp_cache_end -= kBestACacheSize + sizeof(_TCompressedCovers);
                 *out_covers = &compressedCovers->base.ICovers;
-                isUsedCover32 = unchecked(((diffInfo.oldDataSize | diffInfo.newDataSize) < ((ulong)(1) << 32)) ? 1 : 0);
+                isUsedCover32 = unchecked(((diffInfo.OldDataSize | diffInfo.NewDataSize) < ((ulong)(1) << 32)) ? 1 : 0);
             }
             else
             {
@@ -4209,10 +4252,10 @@ public static unsafe partial class HPatch
 
     public static void _singleDiffInfoToHDiffInfo(HPatchCompressedDiffInfo* out_diffInfo, [NativeTypeName("const hpatch_singleCompressedDiffInfo *")] hpatch_singleCompressedDiffInfo* singleDiffInfo)
     {
-        out_diffInfo->newDataSize = singleDiffInfo->newDataSize;
-        out_diffInfo->oldDataSize = singleDiffInfo->oldDataSize;
-        out_diffInfo->compressedCount = (singleDiffInfo->compressedSize > 0) ? 1 : 0;
-        Unsafe.CopyBlockUnaligned(out_diffInfo->compressType, singleDiffInfo->compressType, strlen(singleDiffInfo->compressType) + 1);
+        out_diffInfo->NewDataSize = singleDiffInfo->newDataSize;
+        out_diffInfo->OldDataSize = singleDiffInfo->oldDataSize;
+        out_diffInfo->CompressedCount = (singleDiffInfo->compressedSize > 0) ? 1 : 0;
+        Unsafe.CopyBlockUnaligned(out_diffInfo->CompressType, singleDiffInfo->compressType, strlen(singleDiffInfo->compressType) + 1);
     }
 
     public static void sspatch_covers_init(sspatch_covers_t* self)
