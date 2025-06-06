@@ -3,3 +3,6 @@
 /src/Snap.HPatch/bin
 /src/Snap.HPatch/obj
 *.user
+/.vs
+/Snap.HPatch/x64
+/x64
