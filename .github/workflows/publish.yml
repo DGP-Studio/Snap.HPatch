@@ -1,0 +1,26 @@
+name: Build and Publish NuGet Package
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repo
+      uses: actions/checkout@v2
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Build
+      run: msbuild Snap.HPatch.sln /p:Configuration=Release
+
+    - name: Pack
+      run: nuget pack Snap.HPatch.nuspec
+
+    - name: Publish to NuGet
+      run: nuget push *.nupkg ${{ secrets.NUGET_API_KEY }} -src https://api.nuget.org/v3/index.json
