@@ -3856,3 +3856,8 @@ EXTERN_C __declspec(dllexport) BOOL APIENTRY Patch(HPatch::hpatch_TStreamInput* 
 {
     return HPatch::patch_decompress(target, source, diff, nullptr);
 }
+
+EXTERN_C __declspec(dllexport) BOOL APIENTRY PatchWithDecompressor(HPatch::hpatch_TStreamInput* source, HPatch::hpatch_TStreamInput* diff, HPatch::hpatch_TStreamOutput* target, HPatch::hpatch_TDecompress* decompressor)
+{
+    return HPatch::patch_decompress(target, source, diff, decompressor);
+}
